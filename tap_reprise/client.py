@@ -1,22 +1,28 @@
 """REST client handling, including RepriseStream base class."""
 
-from singer_sdk.helpers.jsonpath import extract_jsonpath
-from singer_sdk.streams import RESTStream
-from typing import Iterable, Tuple, Dict
-from datetime import datetime, timedelta, timezone
-
+import backoff
 import requests
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, Tuple, Dict, Callable, Any, Generator
 
-def date_range(start_datetime: datetime, end_datetime: datetime, step: int = 1) -> Iterable[Tuple[str, str]]:
-    """Generate date ranges of 1 day within the given timeframe.
-    """
-    start = datetime.strptime(start_datetime, "%Y-%m-%d %H:%M:%S")
-    end = datetime.strptime(end_datetime, "%Y-%m-%d %H:%M:%S")
+from singer_sdk.exceptions import RetriableAPIError, FatalAPIError
+from singer_sdk.helpers.jsonpath import extract_jsonpath
+from singer_sdk.pagination import BaseAPIPaginator
+from singer_sdk.streams import RESTStream
 
-    while start < end:
-        next_end = min(start + timedelta(days=step), end)
-        yield start.strftime("%Y-%m-%d %H:%M:%S"), next_end.strftime("%Y-%m-%d %H:%M:%S")
-        start = next_end
+class CustomOffsetPaginator(BaseAPIPaginator):
+    def __init__(self, start_value: int = 0, page_size: int = 250):
+        super().__init__(start_value)
+        self.page_size = page_size
+        self.total_available = None
+
+    def has_more(self, response) -> bool:
+        response_json = response.json()
+        self.total_available = response_json.get("rows_before_limit_at_least", 0)
+        return self.current_value + self.page_size < self.total_available
+
+    def get_next(self, response):
+        return self.current_value + self.page_size
 
 class RepriseStream(RESTStream):
     """Reprise stream class."""
@@ -35,35 +41,19 @@ class RepriseStream(RESTStream):
         url: str = self.config["api_url"]
 
         if self.name == "replay_session_activity_daily":
-            extension: str = "replay_session_activity"
+            extension: str = "replay_session_activity_paging_test"
         elif self.name == "replicate_analytics_daily":
             extension: str = "api_replicate_analytics"
         else:
             extension: str = ""
         return f"{url}{extension}.json?"
 
-    def get_records(self, context: Dict) -> Iterable[dict]:
-        """Override to fetch records for each day period."""
-        
-        for start, end in date_range(self.start_date, self.end_date):
-            self.start_date = start
-            self.end_date = end
-            for record in self.request_records(context):
-                transformed_record = self.post_process(record, context)
+    def get_new_paginator(self):
+        return CustomOffsetPaginator(start_value=0, page_size=250)
 
-                if transformed_record is None:
-                    continue
+    def backoff_wait_generator(self) -> Callable[..., Generator[float, Any, None]]:
+        """Exponential backoff with a per-attempt cap of 300s."""
+        return backoff.expo(base=2, factor=1, max_value=300)
 
-                yield transformed_record
-
-    def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Parse the response and return an iterator of result records.
-
-        Args:
-            response: The HTTP ``requests.Response`` object.
-
-        Yields:
-            Each record from the source.
-        """
-
-        yield from extract_jsonpath(self.records_jsonpath, input=response.json())
+    def backoff_jitter(self, value: float) -> float:
+        return backoff.full_jitter(value)

@@ -56,12 +56,12 @@ plugins:
     - [token, client_id]
 
     config:
-      start_timestamp: '2024-11-21 00:00:00'
-      end_timestamp: '2024-11-23 23:59:59'
+      start_timestamp: '2025-07-30 00:00:00'
+      end_timestamp: '2025-07-31 23:59:59'
       client_id: $REPRISE_CLIENT_ID
       replay_token: $REPRISE_REPLAY_TOKEN
       replicate_token: $REPRISE_REPLICATE_TOKEN
-      domain: ''
+      domain: 'x'
 
   loaders:
   - name: target-jsonl

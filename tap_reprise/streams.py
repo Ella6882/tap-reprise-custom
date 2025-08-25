@@ -37,6 +37,9 @@ class ReplaySessionActivityDailyStream(RepriseStream):
 
         params = {}
 
+        if next_page_token:
+            params["offset"] = next_page_token
+
         replication_key = self.get_starting_timestamp(context)
 
         if replication_key is None:
@@ -44,12 +47,15 @@ class ReplaySessionActivityDailyStream(RepriseStream):
         else:
             start_date = replication_key.strftime("%Y-%m-%d %H:%M:%S")
 
+        self.logger.info("Fetching %s → %s", start_date, self.end_date)
+
         params.update({
             "client_id": self.config["client_id"],
             "start_timestamp": start_date,
             "end_timestamp": self.end_date,
             "visitor_company": 1,
-            "token": self.config["replay_token"]
+            "token": self.config["replay_token"],
+            "limit": 250
         })
             
         return params
@@ -110,6 +116,8 @@ class ReplicateAnalyticsDailyStream(RepriseStream):
         else:
             start_date = replication_key.strftime("%Y-%m-%d %H:%M:%S")
  
+        self.logger.info("Fetching %s → %s", start_date, self.end_date)
+
         params.update({
             "start_timestamp": start_date,
             "end_timestamp": self.end_date,
